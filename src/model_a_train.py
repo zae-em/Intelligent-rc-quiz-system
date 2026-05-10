@@ -37,15 +37,50 @@ def _pick_wh(sentence):
 def generate_questions_from_passage(passage, answer=""):
     sents = split_sentences(passage)
     candidates = []
-    for sent in sents:
-        if len(sent.split()) < 5: continue
-        score = sentence_keyword_overlap(sent, answer) if answer else 0.4
-        wh = _pick_wh(sent)
-        tokens = remove_stopwords(sent.split())
-        rest = " ".join(tokens[:min(6, len(tokens))])
-        q = f"{wh.capitalize()} is {rest}?"
+    ans_lower = answer.lower().strip() if answer else ""
+    
+    templates = [
+        "Which of the following is true according to the passage?",
+        "What is the main idea of the passage?",
+        "What is the best title for the passage?",
+        "What can we learn from the passage?",
+        "According to the passage, which of the following is true?"
+    ]
+    
+    for i, sent in enumerate(sents):
+        tokens_full = sent.split()
+        slen = len(tokens_full)
+        if slen < 5: continue
+        
+        ans_overlap = sentence_keyword_overlap(sent, answer) if answer else 0.0
+        sent_lower = sent.lower()
+        q = ""
+        
+        if ans_lower and len(ans_lower) > 2 and ans_lower in sent_lower:
+            idx = sent_lower.find(ans_lower)
+            q = sent[:idx] + "what" + " " + sent[idx+len(ans_lower):]
+            q = q[0].upper() + q[1:]
+            q = q.rstrip(".!?, ") + "?"
+        else:
+            t_idx = sum(ord(c) for c in sent) % len(templates)
+            q = templates[t_idx]
+            
+        qlen = len(q.split())
+        if qlen < 4: continue
+        
+        slen_score = max(0.0, 1.0 - abs(slen - 15)/20.0)
+        qlen_score = min(qlen / 8.0, 1.0)
+        
+        if answer:
+            score = (ans_overlap * 0.6) + (slen_score * 0.2) + (qlen_score * 0.2)
+        else:
+            score = (slen_score * 0.5) + (qlen_score * 0.5)
+            
         candidates.append((q, sent, score))
+        
     candidates.sort(key=lambda x: x[2], reverse=True)
+    if not candidates:
+        return [("What is the main idea?", "", 0.5)]
     return candidates
 
 def select_best_question(candidates, fe=None):
@@ -127,7 +162,7 @@ def evaluate_model(model, X, y_true, name="Model"):
 # ── Logistic Regression ──────────────────────────────────────────────────────
 class LogisticRegressionModel:
     def __init__(self, C=1.0):
-        self.model = LogisticRegression(C=C, max_iter=1000, solver="saga", n_jobs=-1, random_state=42)
+        self.model = LogisticRegression(C=C, max_iter=5000, solver="saga", n_jobs=-1, random_state=42, class_weight="balanced")
         self.name = "LogisticRegression"
     def fit(self, X, y): self.model.fit(X, y); return self
     def predict(self, X): return self.model.predict(X)
@@ -143,7 +178,7 @@ class LogisticRegressionModel:
 # ── SVM ─────────────────────────────────────────────────────────────────────
 class SVMModel:
     def __init__(self, C=1.0):
-        self.model = CalibratedClassifierCV(LinearSVC(C=C, max_iter=2000, random_state=42), cv=3)
+        self.model = CalibratedClassifierCV(LinearSVC(C=C, max_iter=5000, random_state=42, class_weight="balanced"), cv=3)
         self.name = "SVM"
     def fit(self, X, y): self.model.fit(X, y); return self
     def predict(self, X): return self.model.predict(X)

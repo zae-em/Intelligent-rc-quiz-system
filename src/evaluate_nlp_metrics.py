@@ -6,10 +6,10 @@ from rouge_score import rouge_scorer
 import nltk
 
 sys.path.insert(0, os.path.dirname(__file__))
-from preprocessing import load_race_dataset
+from preprocessing import load_race_dataset, DEFAULT_RAW
 from model_a_train import generate_questions_from_passage, select_best_question
 
-DATA_RAW = "data/raw"
+DATA_RAW = DEFAULT_RAW
 
 def approximate_meteor(ref_tokens, gen_tokens):
     # Simplified METEOR without wordnet (exact match precision/recall + penalty)
@@ -66,7 +66,7 @@ def evaluate_generation_metrics():
             gen_tokens = gen_q.lower().split()
 
         # 1. BLEU Score
-        bleu = sentence_bleu([ref_tokens], gen_tokens, smoothing_function=smoothie)
+        bleu = sentence_bleu([ref_tokens], gen_tokens, weights=(1, 0, 0, 0), smoothing_function=smoothie)
         bleu_scores.append(bleu)
 
         # 2. ROUGE Score
@@ -79,12 +79,12 @@ def evaluate_generation_metrics():
         meteor_scores.append(approximate_meteor(ref_tokens, gen_tokens))
 
     print("--- GENERATION METRICS ---")
-    print(f"Average BLEU Score  : {sum(bleu_scores)/len(bleu_scores):.4f}")
+    print(f"Average BLEU-1 Score: {sum(bleu_scores)/len(bleu_scores):.4f}")
     print(f"Average ROUGE-1     : {sum(rouge1_scores)/len(rouge1_scores):.4f}")
     print(f"Average ROUGE-2     : {sum(rouge2_scores)/len(rouge2_scores):.4f}")
     print(f"Average ROUGE-L     : {sum(rougeL_scores)/len(rougeL_scores):.4f}")
     print(f"Average METEOR Score: {sum(meteor_scores)/len(meteor_scores):.4f} (Approximated)")
-    print("\n✅ Generation metrics calculated successfully.")
+    print("\n Generation metrics calculated successfully.")
 
 if __name__ == "__main__":
     evaluate_generation_metrics()

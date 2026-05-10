@@ -11,15 +11,64 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from sklearn.metrics import (accuracy_score, precision_score, recall_score,
                              f1_score, confusion_matrix, ConfusionMatrixDisplay, r2_score)
+import nltk
+from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
+from rouge_score import rouge_scorer
 
 sys.path.insert(0, os.path.dirname(__file__))
 from preprocessing import FeatureEngineering, load_race_dataset, expand_options, DEFAULT_RAW, DEFAULT_PROCESSED
 from model_a_train  import (LogisticRegressionModel, SVMModel, KMeansClusteringModel,
-                             EnsembleModel, build_feature_matrix, MODEL_A_DIR)
+                             EnsembleModel, build_feature_matrix, MODEL_A_DIR, generate_questions_from_passage, select_best_question)
 from model_b_train  import DistractorRanker, HintGenerator, MODEL_B_DIR
 
 PROCESSED_DIR = DEFAULT_PROCESSED
 RAW_DIR       = DEFAULT_RAW
+
+def approximate_meteor(ref_tokens, gen_tokens):
+    if not ref_tokens or not gen_tokens: return 0.0
+    matches = sum(1 for t in gen_tokens if t in ref_tokens)
+    if matches == 0: return 0.0
+    precision = matches / len(gen_tokens)
+    recall = matches / len(ref_tokens)
+    fmean = (10 * precision * recall) / (recall + 9 * precision)
+    penalty = 0.5 * (1**3)
+    return fmean * (1 - penalty)
+
+def evaluate_generation_metrics(df_test):
+    print("\n--- GENERATION METRICS (BLEU, ROUGE, METEOR) ---")
+    if df_test.empty: return {}
+    subset_size = min(50, len(df_test))
+    df_subset = df_test.iloc[:subset_size]
+    scorer = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeL'], use_stemmer=True)
+    smoothie = SmoothingFunction().method4
+    
+    b, r1, r2, rl, m = [], [], [], [], []
+    for i, row in df_subset.iterrows():
+        passage = str(row.get("article", ""))
+        ref_q = str(row.get("question", ""))
+        ans_letter = str(row.get("answer", "A"))
+        ans_text = str(row.get(ans_letter, ""))
+        
+        cands = generate_questions_from_passage(passage, ans_text)
+        gen_q, _, _ = select_best_question(cands)
+        
+        ref_toks = ref_q.lower().split()
+        gen_toks = gen_q.lower().split()
+        
+        b.append(sentence_bleu([ref_toks], gen_toks, weights=(1.0, 0, 0, 0), smoothing_function=smoothie))
+        s = scorer.score(ref_q, gen_q)
+        r1.append(s['rouge1'].fmeasure); r2.append(s['rouge2'].fmeasure); rl.append(s['rougeL'].fmeasure)
+        m.append(approximate_meteor(ref_toks, gen_toks))
+        
+    metrics = {
+        "bleu-1": sum(b)/len(b),
+        "rouge1": sum(r1)/len(r1),
+        "rouge2": sum(r2)/len(r2),
+        "rougeL": sum(rl)/len(rl),
+        "meteor": sum(m)/len(m)
+    }
+    print(f"  BLEU-1: {metrics['bleu-1']:.4f} | ROUGE-1: {metrics['rouge1']:.4f} | ROUGE-L: {metrics['rougeL']:.4f} | METEOR: {metrics['meteor']:.4f}")
+    return metrics
 
 def _compute_metrics(y_true, y_pred, name="Model"):
     acc  = accuracy_score(y_true, y_pred)
@@ -82,6 +131,19 @@ def evaluate_model_a_full(save_plots=True):
 
     for name, model in [("LogisticRegression",lr),("SVM",svm),("Ensemble(LR+SVM)",ens)]:
         m = _compute_metrics(y_test, model.predict(X_test), name)
+        if hasattr(model, "predict_proba"):
+            probs = model.predict_proba(X_test)[:, 1]
+            test_exp["prob"] = probs
+            correct_mcq = 0
+            total_mcq = test_exp["id"].nunique()
+            for q_id, group in test_exp.groupby("id"):
+                best_idx = group["prob"].idxmax()
+                if group.loc[best_idx, "label"] == 1:
+                    correct_mcq += 1
+            mcq_acc = correct_mcq / total_mcq if total_mcq > 0 else 0.0
+            m["mcq_accuracy"] = mcq_acc
+            print(f"  [{name}] MCQ Accuracy = {mcq_acc:.4f}")
+            
         results[name] = m
         if save_plots and "confusion_matrix" in m:
             _save_cm_plot(m["confusion_matrix"], f"CM — {name}",
@@ -89,6 +151,12 @@ def evaluate_model_a_full(save_plots=True):
 
     results["KMeans"] = {"silhouette_score": km.get_silhouette()}
     print(f"  KMeans Silhouette: {km.get_silhouette():.4f}")
+    
+    # NLP Generation metrics
+    if "test_raw" in locals():
+        gen_m = evaluate_generation_metrics(test_raw)
+        results["Generation"] = gen_m
+        
     joblib.dump(results, os.path.join(MODEL_A_DIR,"eval_results.pkl"))
     print("Model A evaluation saved.")
     return results

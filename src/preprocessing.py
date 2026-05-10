@@ -65,8 +65,7 @@ def load_race_dataset(data_dir=None, chunksize=None):
             splits[split] = df
             print(f"  Loaded {split}: {df.shape}")
         else:
-            print(f"  [{split}.csv not found] generating synthetic demo data")
-            splits[split] = _generate_synthetic(200 if split=="train" else 50)
+            raise FileNotFoundError(f"Missing required file: {path}. Please place train.csv, val.csv, and test.csv in data/raw/")
     return splits["train"], splits["val"], splits["test"]
 
 def _generate_synthetic(n=200):
@@ -110,6 +109,7 @@ def expand_options(df):
         tmp = df[["id", "article", "question", letter, "answer"]].copy()
         tmp = tmp.rename(columns={letter: "option"})
         tmp["option"] = tmp["option"].astype(str)
+        tmp["option_label"] = letter
         tmp["label"] = (tmp["answer"] == letter).astype(int)
         frames.append(tmp)
     result = pd.concat(frames, ignore_index=True)

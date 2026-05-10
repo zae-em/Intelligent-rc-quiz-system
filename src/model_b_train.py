@@ -231,15 +231,19 @@ def train_model_b(data_dir=None, processed_dir=None):
 
     print("\n[2] Training Hint Generator...")
     hint_gen = HintGenerator()
-    X_h, y_h = hint_gen.build_training_data(train_raw)     # full dataset
-    print(f"  Hint training data: {X_h.shape}")
-    hint_gen.fit(X_h, y_h); hint_gen.save()
-    if len(y_h) > 1:
-        yp   = hint_gen.model.predict(X_h)
-        acc_h  = accuracy_score(y_h, yp)
-        prec_h = precision_score(y_h, yp, average="macro", zero_division=0)
-        rec_h  = recall_score(y_h, yp, average="macro", zero_division=0)
-        f1_h   = f1_score(y_h, yp, average="macro", zero_division=0)
+    X_h_train, y_h_train = hint_gen.build_training_data(train_raw)     # full dataset
+    print(f"  Hint training data: {X_h_train.shape}")
+    hint_gen.fit(X_h_train, y_h_train); hint_gen.save()
+    
+    print("\n  Evaluating Hint Generator on Validation Data...")
+    X_h_val, y_h_val = hint_gen.build_training_data(val_raw)
+    
+    if len(y_h_val) > 1:
+        yp   = hint_gen.model.predict(X_h_val)
+        acc_h  = accuracy_score(y_h_val, yp)
+        prec_h = precision_score(y_h_val, yp, average="macro", zero_division=0)
+        rec_h  = recall_score(y_h_val, yp, average="macro", zero_division=0)
+        f1_h   = f1_score(y_h_val, yp, average="macro", zero_division=0)
 
         print(f"\n  ┌─── HintGenerator ───")
         print(f"  │  Binary Accuracy   : {acc_h:.4f}  ({acc_h*100:.2f}%)")
