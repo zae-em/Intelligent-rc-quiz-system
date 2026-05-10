@@ -92,10 +92,14 @@ with st.sidebar:
                 unsafe_allow_html=True)
     st.markdown("---")
     st.markdown("**🗂 Navigation**")
-    nav = st.radio("nav", ["📖 Article Input","🧠 Quiz","💡 Hints","📊 Analytics"],
-                   label_visibility="collapsed")
     screen_map = {"📖 Article Input":"input","🧠 Quiz":"quiz","💡 Hints":"hints","📊 Analytics":"analytics"}
-    st.session_state.screen = screen_map[nav]
+    inv_map = {v:k for k,v in screen_map.items()}
+    current_idx = list(screen_map.keys()).index(inv_map.get(st.session_state.get("screen", "input"), "📖 Article Input"))
+    
+    def on_nav_change():
+        st.session_state.screen = screen_map[st.session_state.nav_radio]
+        
+    nav = st.radio("nav", list(screen_map.keys()), index=current_idx, key="nav_radio", on_change=on_nav_change, label_visibility="collapsed")
     st.markdown("---")
     st.markdown("**🎲 Load Sample**")
     sample_name = st.selectbox("sample", ["— Select —"]+list(SAMPLES.keys()), label_visibility="collapsed")
@@ -210,14 +214,22 @@ elif st.session_state.screen == "quiz":
         sel = st.session_state.selected_option
         correct_letter = qd["correct_letter"]
         is_correct = sel == correct_letter
+        passage = st.session_state.passage
+        question = qd["question"]
+        selected_text = options.get(sel, "")
+        correct_text = options.get(correct_letter, "")
+        
+        verify_res = pipe.verify_answer(passage, question, selected_text, correct_text)
+        confidence = verify_res["confidence"]
+        
         st.session_state.answer_checked = True
         st.session_state.session_answers.append({"question":qd["question"][:60],"selected":sel,
-                                                  "correct":correct_letter,"is_correct":is_correct})
+                                                  "correct":correct_letter,"is_correct":is_correct, "confidence": confidence})
         if is_correct:
-            st.markdown("""<div style='background:linear-gradient(135deg,#052e16,#14532d);
+            st.markdown(f"""<div style='background:linear-gradient(135deg,#052e16,#14532d);
               border:2px solid #22c55e;border-radius:12px;padding:1.2rem 1.5rem;margin-top:1rem'>
               <h3 style='color:#4ade80;margin:0'>🎉 Correct!</h3>
-              <p style='color:#bbf7d0;margin:.4rem 0 0'>Well done! That's the right answer.</p></div>""",
+              <p style='color:#bbf7d0;margin:.4rem 0 0'>Well done! That's the right answer. (Model A Confidence: {confidence*100:.1f}%)</p></div>""",
               unsafe_allow_html=True)
         else:
             ct = options.get(correct_letter,"")
@@ -225,6 +237,7 @@ elif st.session_state.screen == "quiz":
               border:2px solid #ef4444;border-radius:12px;padding:1.2rem 1.5rem;margin-top:1rem'>
               <h3 style='color:#f87171;margin:0'>❌ Incorrect</h3>
               <p style='color:#fecaca;margin:.4rem 0 0'>Correct answer: <strong>{correct_letter}. {ct}</strong></p>
+              <p style='color:#fecaca;margin:.4rem 0 0;font-size:0.9rem'>Model A Confidence: {confidence*100:.1f}%</p>
               </div>""", unsafe_allow_html=True)
         st.markdown("---"); st.markdown("**Answer breakdown:**")
         for letter, opt_text in options.items():
@@ -306,18 +319,36 @@ elif st.session_state.screen == "analytics":
         st.markdown("### Model A — Answer Verifier")
         st.caption("Logistic Regression · SVM · Ensemble · K-Means")
         for mname in ["LogisticRegression","SVM","Ensemble(LR+SVM)"]:
-            m = ma.get(mname, {"accuracy":.72,"precision":.68,"recall":.75,"f1":.71})
+            if mname not in ma:
+                st.warning(f"No metrics for {mname}. Run evaluation suite.")
+                continue
+            m = ma[mname]
             st.markdown(f"**{mname}**")
             c1,c2,c3,c4 = st.columns(4)
             c1.metric("Accuracy",  f"{m.get('accuracy',0):.3f}")
             c2.metric("Precision", f"{m.get('precision',0):.3f}")
             c3.metric("Recall",    f"{m.get('recall',0):.3f}")
             c4.metric("F1 Score",  f"{m.get('f1',0):.3f}")
+            
+            if "mcq_accuracy" in m:
+                st.metric("MCQ Option-Picking Accuracy", f"{m['mcq_accuracy']:.3f}")
+                
             if "confusion_matrix" in m:
                 col1,col2 = st.columns(2)
                 with col1: st.pyplot(plot_metrics_bar(m,f"{mname} Metrics"), use_container_width=True)
                 with col2: st.pyplot(plot_confusion_matrix_fig(m["confusion_matrix"],f"CM — {mname}"), use_container_width=True)
             st.markdown("---")
+            
+        gen = ma.get("Generation", {})
+        if gen:
+            st.markdown("### NLP Generation Metrics (Model A Question Gen)")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("BLEU-1", f"{gen.get('bleu-1',0):.4f}")
+            c2.metric("ROUGE-1", f"{gen.get('rouge1',0):.4f}")
+            c3.metric("ROUGE-L", f"{gen.get('rougeL',0):.4f}")
+            c4.metric("METEOR", f"{gen.get('meteor',0):.4f}")
+            st.markdown("---")
+            
         km_sil = ma.get("KMeans",{}).get("silhouette_score",None)
         if km_sil is not None:
             st.metric("K-Means Silhouette Score", f"{km_sil:.4f}")
@@ -357,7 +388,10 @@ elif st.session_state.screen == "analytics":
     with tab_b:
         st.markdown("### Model B — Distractor & Hint Generator")
         for comp in ["DistractorRanker","HintGenerator"]:
-            m = mb.get(comp, {"accuracy":.70,"precision":.65,"recall":.73,"f1":.69})
+            if comp not in mb:
+                st.warning(f"No metrics for {comp}. Run evaluation suite.")
+                continue
+            m = mb[comp]
             st.markdown(f"**{comp}**")
             c1,c2,c3,c4 = st.columns(4)
             c1.metric("Accuracy",  f"{m.get('accuracy',0):.3f}")
