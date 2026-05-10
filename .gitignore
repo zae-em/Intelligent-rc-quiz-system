@@ -1,0 +1,41 @@
+cat > .gitignore << 'EOF'
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Trained model files (large binaries)
+models/model_a/traditional/*.pkl
+models/model_b/traditional/*.pkl
+
+# Processed data (auto-generated on run)
+data/processed/*.csv
+data/processed/*.png
+data/processed/*.npy
+
+# Raw RACE dataset (too large for GitHub)
+data/raw/train.csv
+data/raw/val.csv
+data/raw/test.csv
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Streamlit cache
+.streamlit/
+EOF
